@@ -18,7 +18,7 @@ pub enum MessageStatus {
 #[derive(Debug)]
 pub struct MessageEntity {
     pub id: i32,
-    pub message_status: MessageStatus,
+    pub status: MessageStatus,
     pub payload: serde_json::Value,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
@@ -47,7 +47,7 @@ impl Messenger {
     pub async fn find_by_id(&self, id: i32) -> Result<MessageEntity, sqlx::Error> {
         let record = sqlx::query!(
             r#"
-            SELECT id, status AS "message_status!: MessageStatus", payload, created_at, updated_at
+            SELECT id, status AS "status!: MessageStatus", payload, created_at, updated_at
             FROM messages
             WHERE id = $1;
 "#,
@@ -58,7 +58,7 @@ impl Messenger {
 
         let entity = MessageEntity {
             id: record.id,
-            message_status: record.message_status,
+            status: record.status,
             payload: record.payload.into(),
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -70,7 +70,7 @@ impl Messenger {
     pub async fn add(&self, message: Message) -> Result<MessageEntity, sqlx::Error> {
         let record = sqlx::query!(
             "INSERT INTO messages(status, payload) VALUES ($1, $2)
-RETURNING id, status AS \"message_status!: MessageStatus\", payload, created_at, updated_at;",
+RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated_at;",
             MessageStatus::Pending as MessageStatus,
             message.payload
         )
@@ -79,7 +79,7 @@ RETURNING id, status AS \"message_status!: MessageStatus\", payload, created_at,
 
         let entity = MessageEntity {
             id: record.id,
-            message_status: MessageStatus::Pending,
+            status: MessageStatus::Pending,
             payload: record.payload.into(),
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -91,7 +91,7 @@ RETURNING id, status AS \"message_status!: MessageStatus\", payload, created_at,
     pub async fn fetch_next(&self) -> Result<(), sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let result = sqlx::query!(
-            r#"select id, status AS "message_status!: MessageStatus", payload, created_at, updated_at
+            r#"select id, status AS "status!: MessageStatus", payload, created_at, updated_at
              FROM messages where status = 'pending'
              ORDER BY id ASC
              FOR UPDATE SKIP LOCKED
@@ -99,11 +99,11 @@ RETURNING id, status AS \"message_status!: MessageStatus\", payload, created_at,
 "#
         )
         .fetch_one(&mut *transaction)
-            .await?;
+        .await?;
 
         let entity = MessageEntity {
             id: result.id,
-            message_status: result.message_status,
+            status: result.status,
             payload: result.payload.into(),
             created_at: result.created_at,
             updated_at: result.updated_at,
@@ -180,7 +180,7 @@ mod tests {
 
         println!("{:?}", actual);
 
-        assert_eq!(MessageStatus::Completed, actual.message_status);
+        assert_eq!(MessageStatus::Completed, actual.status);
         assert_eq!(saved_message.id, actual.id);
     }
 
