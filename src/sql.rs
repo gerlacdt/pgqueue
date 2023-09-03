@@ -88,9 +88,9 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
         Ok(entity)
     }
 
-    pub async fn process_next<F: FnOnce(&MessageEntity) -> ()>(
+    pub async fn process_next<F: FnOnce(&MessageEntity) -> Result<(), sqlx::Error>>(
         &self,
-        processFn: F,
+        process_fn: F,
     ) -> Result<(), sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let result = sqlx::query!(
@@ -112,7 +112,7 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
             updated_at: result.updated_at,
         };
 
-        processFn(&entity);
+        process_fn(&entity)?;
 
         sqlx::query!(
             r#"
@@ -172,11 +172,12 @@ mod tests {
             payload: json!(payload),
         };
         let saved_message = sut.add(msg).await.unwrap();
-        let processFn = |entity: &MessageEntity| {
+        let process_fn = |entity: &MessageEntity| {
             println!("processFn(): message.id: {:?}", entity.id);
             println!("processFn(): message.payload: {:?}", entity.payload);
+            Ok(())
         };
-        sut.process_next(processFn).await.unwrap();
+        sut.process_next(process_fn).await.unwrap();
 
         let actual = sut.find_by_id(saved_message.id).await.unwrap();
 
