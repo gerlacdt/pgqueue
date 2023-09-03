@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 
 build:
-	set -a && source files/env/dev.env && cargo build
+	set -a && source files/env/dev.env && cargo clippy && cargo build
 
 release:
 	set -a && source files/env/dev.env && cargo build --release
