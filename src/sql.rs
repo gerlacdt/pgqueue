@@ -35,7 +35,7 @@ pub struct Payload {
     message: String,
 }
 
-struct Messenger {
+pub struct Messenger {
     pool: PgPool,
 }
 
@@ -88,7 +88,10 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
         Ok(entity)
     }
 
-    pub async fn fetch_next(&self) -> Result<(), sqlx::Error> {
+    pub async fn process_next<F: FnOnce(&MessageEntity) -> ()>(
+        &self,
+        processFn: F,
+    ) -> Result<(), sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let result = sqlx::query!(
             r#"select id, status AS "status!: MessageStatus", payload, created_at, updated_at
@@ -108,6 +111,8 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
             created_at: result.created_at,
             updated_at: result.updated_at,
         };
+
+        processFn(&entity);
 
         sqlx::query!(
             r#"
@@ -132,12 +137,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn hello_test() {
-        hello();
-        assert!(true);
-    }
-
-    #[tokio::test]
     async fn add_test() {
         let pool = get_pool().await;
         setup_db(pool.clone()).await.unwrap();
@@ -160,7 +159,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_next_test() {
+    async fn process_next_test() {
         let pool = get_pool().await;
         setup_db(pool.clone()).await.unwrap();
         let sut = Messenger::new(pool);
@@ -173,12 +172,13 @@ mod tests {
             payload: json!(payload),
         };
         let saved_message = sut.add(msg).await.unwrap();
-
-        sut.fetch_next().await.unwrap();
+        let processFn = |entity: &MessageEntity| {
+            println!("processFn(): message.id: {:?}", entity.id);
+            println!("processFn(): message.payload: {:?}", entity.payload);
+        };
+        sut.process_next(processFn).await.unwrap();
 
         let actual = sut.find_by_id(saved_message.id).await.unwrap();
-
-        println!("{:?}", actual);
 
         assert_eq!(MessageStatus::Completed, actual.status);
         assert_eq!(saved_message.id, actual.id);
