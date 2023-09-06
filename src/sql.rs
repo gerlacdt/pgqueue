@@ -1,6 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{postgres::PgListener, PgPool};
 
 pub fn hello() {
     println!("Hello World!");
@@ -42,6 +42,22 @@ pub struct Messenger {
 impl Messenger {
     pub fn new(pool: PgPool) -> Self {
         Messenger { pool }
+    }
+
+    async fn listen(&self) -> Result<(), sqlx::Error> {
+        let mut listener = PgListener::connect_with(&self.pool).await?;
+        listener.listen("queue_notifications").await?;
+
+        loop {
+            let _notification = listener.recv().await;
+            println!("[from recv]: message received");
+            let process_fn = |entity: &MessageEntity| {
+                println!("processFn(): message.id: {:?}", entity.id);
+                println!("processFn(): message.payload: {:?}", entity.payload);
+                Ok(())
+            };
+            self.process_next(process_fn).await.unwrap();
+        }
     }
 
     pub async fn find_by_id(&self, id: i32) -> Result<MessageEntity, sqlx::Error> {
@@ -194,5 +210,21 @@ mod tests {
     async fn setup_db(pool: PgPool) -> Result<(), sqlx::Error> {
         sqlx::query!("DELETE FROM messages").execute(&pool).await?;
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn listen_test() {
+        let pool = get_pool().await;
+        setup_db(pool.clone()).await.unwrap();
+        let sut = Messenger::new(pool);
+
+        tokio::spawn(async move {
+            match sut.listen().await {
+                Err(err) => println!("ERROR in listener, {:?}", err),
+                _ => println!("listner should bloc"),
+            }
+        });
+
+        // NOTIFY channel, with add() new message into channel
     }
 }
