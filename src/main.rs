@@ -21,13 +21,17 @@ async fn foo() -> Result<(), sqlx::Error> {
         }
     };
 
+    let (start_tx, start_rx): (Sender<()>, Receiver<()>) = mpsc::channel();
+    let start_tx2 = start_tx.clone();
     let _ = tokio::spawn(async move {
+        start_tx.send(()).unwrap();
         listen(pool, process_fn)
             .await
             .expect("ERROR listening to pq task queue");
     });
 
     let rx_handle = tokio::spawn(async move {
+        start_tx2.send(()).unwrap();
         for _ in 0..3 {
             match rx.recv() {
                 Ok(msg) => println!("recv(): {:?}", msg),
@@ -37,6 +41,8 @@ async fn foo() -> Result<(), sqlx::Error> {
     });
 
     // NOTIFY channel, with add() new message into channel
+    start_rx.recv().unwrap();
+    start_rx.recv().unwrap();
     let messenger = Messenger::new(pool2);
     for i in 0..3 {
         let payload = Payload {
