@@ -1,14 +1,16 @@
-use std::sync::mpsc::{self, Receiver, Sender};
-
 use pgqueue::sql::{listen, Message, MessageEntity, Messenger, Payload};
 use serde_json::json;
 use sqlx::PgPool;
+use std::sync::mpsc::{self, Receiver, Sender};
 
 #[tokio::main]
 async fn main() {
     let _ = foo().await.unwrap();
 }
 
+// more information
+// https://github.com/launchbadge/sqlx/blob/main/examples/postgres/listen/src/main.rs
+// https://www.fforward.ai/blog/posts/postgres-task-queues-the-secret-weapon-killing-specialized-queue-services
 async fn foo() -> Result<(), sqlx::Error> {
     let pool = get_pool().await;
     let pool2 = pool.clone();
