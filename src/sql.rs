@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgListener, PgPool};
@@ -15,7 +17,7 @@ pub enum MessageStatus {
     Failed,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MessageEntity {
     pub id: i32,
     pub status: MessageStatus,
@@ -39,16 +41,15 @@ pub struct Messenger {
     pool: PgPool,
 }
 
-pub async fn listen<F: FnOnce(&MessageEntity) -> Result<(), sqlx::Error> + std::marker::Copy>(
-    pool: PgPool,
-    process_fn: F,
-) -> Result<(), sqlx::Error> {
+pub async fn listen<F>(pool: PgPool, process_fn: F) -> Result<(), sqlx::Error>
+where
+    F: Fn(&MessageEntity),
+{
     let mut listener = PgListener::connect_with(&pool).await?;
     listener.listen("queue_notifications").await?;
 
     loop {
         let _notification = listener.recv().await;
-        println!("[from recv]: message received");
         let mut transaction = pool.begin().await?;
         let result = sqlx::query!(
             r#"select id, status AS "status!: MessageStatus", payload, created_at, updated_at
@@ -69,7 +70,7 @@ pub async fn listen<F: FnOnce(&MessageEntity) -> Result<(), sqlx::Error> + std::
             updated_at: result.updated_at,
         };
 
-        process_fn(&entity)?;
+        process_fn(&entity);
 
         sqlx::query!(
             r#"
