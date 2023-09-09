@@ -30,34 +30,64 @@ pub struct Message {
 
 #[derive(Deserialize, Serialize)]
 pub struct Payload {
-    version: i32,
-    kind: String,
-    message: String,
+    pub version: i32,
+    pub kind: String,
+    pub message: String,
 }
 
 pub struct Messenger {
     pool: PgPool,
 }
 
+pub async fn listen<F: FnOnce(&MessageEntity) -> Result<(), sqlx::Error> + std::marker::Copy>(
+    pool: PgPool,
+    process_fn: F,
+) -> Result<(), sqlx::Error> {
+    let mut listener = PgListener::connect_with(&pool).await?;
+    listener.listen("queue_notifications").await?;
+
+    loop {
+        let _notification = listener.recv().await;
+        println!("[from recv]: message received");
+        let mut transaction = pool.begin().await?;
+        let result = sqlx::query!(
+            r#"select id, status AS "status!: MessageStatus", payload, created_at, updated_at
+             FROM messages where status = 'pending'
+             ORDER BY id ASC
+             FOR UPDATE SKIP LOCKED
+             LIMIT 1;
+"#
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+
+        let entity = MessageEntity {
+            id: result.id,
+            status: result.status,
+            payload: result.payload.into(),
+            created_at: result.created_at,
+            updated_at: result.updated_at,
+        };
+
+        process_fn(&entity)?;
+
+        sqlx::query!(
+            r#"
+            UPDATE messages
+            SET status = 'completed'
+            where id = $1
+"#,
+            entity.id
+        )
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+    }
+}
+
 impl Messenger {
     pub fn new(pool: PgPool) -> Self {
         Messenger { pool }
-    }
-
-    async fn listen(&self) -> Result<(), sqlx::Error> {
-        let mut listener = PgListener::connect_with(&self.pool).await?;
-        listener.listen("queue_notifications").await?;
-
-        loop {
-            let _notification = listener.recv().await;
-            println!("[from recv]: message received");
-            let process_fn = |entity: &MessageEntity| {
-                println!("processFn(): message.id: {:?}", entity.id);
-                println!("processFn(): message.payload: {:?}", entity.payload);
-                Ok(())
-            };
-            self.process_next(process_fn).await.unwrap();
-        }
     }
 
     pub async fn find_by_id(&self, id: i32) -> Result<MessageEntity, sqlx::Error> {
@@ -148,6 +178,8 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
 
 #[cfg(test)]
 mod tests {
+    use std::{thread::sleep, time::Duration};
+
     use serde_json::json;
 
     use super::*;
@@ -215,16 +247,36 @@ mod tests {
     #[tokio::test]
     async fn listen_test() {
         let pool = get_pool().await;
+        let pool2 = pool.clone();
         setup_db(pool.clone()).await.unwrap();
-        let sut = Messenger::new(pool);
 
         tokio::spawn(async move {
-            match sut.listen().await {
+            println!("started tokio spawn()");
+            let process_fn = |entity: &MessageEntity| {
+                println!("processFn(): message.id: {:?}", entity.id);
+                println!("processFn(): message.payload: {:?}", entity.payload);
+                Ok(())
+            };
+            match listen(pool, process_fn).await {
                 Err(err) => println!("ERROR in listener, {:?}", err),
                 _ => println!("listner should bloc"),
             }
         });
 
         // NOTIFY channel, with add() new message into channel
+        let payload = Payload {
+            version: 1,
+            kind: "Command".to_owned(),
+            message: "my new message notification".to_owned(),
+        };
+        let msg = Message {
+            payload: json!(payload),
+        };
+        let sut = Messenger::new(pool2);
+        sut.add(msg).await.unwrap();
+
+        sleep(Duration::from_millis(5000));
+
+        assert!(false);
     }
 }
