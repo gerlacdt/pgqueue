@@ -1,5 +1,3 @@
-use std::future::Future;
-
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgListener, PgPool};
@@ -48,41 +46,11 @@ where
     let mut listener = PgListener::connect_with(&pool).await?;
     listener.listen("queue_notifications").await?;
 
+    let messenger = Messenger::new(pool.clone());
+
     loop {
         let _notification = listener.recv().await;
-        let mut transaction = pool.begin().await?;
-        let result = sqlx::query!(
-            r#"select id, status AS "status!: MessageStatus", payload, created_at, updated_at
-             FROM messages where status = 'pending'
-             ORDER BY id ASC
-             FOR UPDATE SKIP LOCKED
-             LIMIT 1;
-"#
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-
-        let entity = MessageEntity {
-            id: result.id,
-            status: result.status,
-            payload: result.payload.into(),
-            created_at: result.created_at,
-            updated_at: result.updated_at,
-        };
-
-        process_fn(&entity);
-
-        sqlx::query!(
-            r#"
-            UPDATE messages
-            SET status = 'completed'
-            where id = $1
-"#,
-            entity.id
-        )
-        .execute(&mut *transaction)
-        .await?;
-        transaction.commit().await?;
+        messenger.process_next(&process_fn).await?;
     }
 }
 
@@ -135,7 +103,7 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
         Ok(entity)
     }
 
-    pub async fn process_next<F>(&self, process_fn: F) -> Result<(), sqlx::Error>
+    pub async fn process_next<F>(&self, process_fn: &F) -> Result<(), sqlx::Error>
     where
         F: Fn(&MessageEntity),
     {
@@ -225,7 +193,7 @@ mod tests {
             println!("processFn(): message.id: {:?}", entity.id);
             println!("processFn(): message.payload: {:?}", entity.payload);
         };
-        sut.process_next(process_fn).await.unwrap();
+        sut.process_next(&process_fn).await.unwrap();
 
         let actual = sut.find_by_id(saved_message.id).await.unwrap();
 
