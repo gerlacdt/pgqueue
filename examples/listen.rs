@@ -1,16 +1,15 @@
-use pgqueue::sql::{listen, Message, MessageEntity, Messenger, Payload};
+use pgqueue::sql::{Message, MessageEntity, Messenger, Payload};
 use serde_json::json;
-use sqlx::PgPool;
+use sqlx::{postgres::PgListener, PgPool};
 use std::sync::mpsc::{self, Receiver, Sender};
+
+static QUEUE_NAME: &'static str = "queue_notifications";
 
 #[tokio::main]
 async fn main() {
     let _ = example().await.unwrap();
 }
 
-// more information
-// https://github.com/launchbadge/sqlx/blob/main/examples/postgres/listen/src/main.rs
-// https://www.fforward.ai/blog/posts/postgres-task-queues-the-secret-weapon-killing-specialized-queue-services
 async fn example() -> Result<(), sqlx::Error> {
     let pool = get_pool().await;
     // clean DB, so only new message get processed
@@ -37,10 +36,8 @@ async fn example() -> Result<(), sqlx::Error> {
     let rx_handle = tokio::spawn(async move {
         start_tx2.send(()).unwrap();
         for _ in 0..3 {
-            match rx.recv() {
-                Ok(msg) => println!("recv(): {:?}", msg),
-                Err(err) => println!("Err: {:?}", err),
-            }
+            let msg = rx.recv().unwrap();
+            println!("recv(): {:?}", msg);
         }
     });
 
@@ -49,10 +46,9 @@ async fn example() -> Result<(), sqlx::Error> {
     start_rx.recv().unwrap();
     let messenger = Messenger::new(pool2);
     for i in 0..3 {
-        println!("##################### in loop");
         let payload = Payload {
-            version: 2,
-            kind: "Query".to_owned(),
+            version: 1,
+            kind: "COMMAND".to_owned(),
             message: format!("message: {}", i),
         };
         let msg = Message {
@@ -71,5 +67,15 @@ async fn get_pool() -> PgPool {
     PgPool::connect(&conn_str).await.unwrap()
 }
 
-// write a process_fn with channels and wait for results
-// we should get rid of sleep()
+async fn listen<F>(pool: PgPool, process_fn: F) -> Result<(), sqlx::Error>
+where
+    F: Fn(&MessageEntity),
+{
+    let mut listener = PgListener::connect_with(&pool).await?;
+    listener.listen(QUEUE_NAME).await?;
+    let messenger = Messenger::new(pool.clone());
+    loop {
+        let _notification = listener.recv().await;
+        messenger.process_next(&process_fn).await?;
+    }
+}

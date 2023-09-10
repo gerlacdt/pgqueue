@@ -1,6 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgListener, PgPool};
+use sqlx::PgPool;
 
 pub fn hello() {
     println!("Hello World!");
@@ -37,19 +37,6 @@ pub struct Payload {
 
 pub struct Messenger {
     pool: PgPool,
-}
-
-pub async fn listen<F>(pool: PgPool, process_fn: F) -> Result<(), sqlx::Error>
-where
-    F: Fn(&MessageEntity),
-{
-    let mut listener = PgListener::connect_with(&pool).await?;
-    listener.listen("queue_notifications").await?;
-    let messenger = Messenger::new(pool.clone());
-    loop {
-        let _notification = listener.recv().await;
-        messenger.process_next(&process_fn).await?;
-    }
 }
 
 impl Messenger {
@@ -145,7 +132,6 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
 
 #[cfg(test)]
 mod tests {
-    use std::{thread::sleep, time::Duration};
 
     use serde_json::json;
 
