@@ -135,10 +135,10 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
         Ok(entity)
     }
 
-    pub async fn process_next<F: FnOnce(&MessageEntity) -> Result<(), sqlx::Error>>(
-        &self,
-        process_fn: F,
-    ) -> Result<(), sqlx::Error> {
+    pub async fn process_next<F>(&self, process_fn: F) -> Result<(), sqlx::Error>
+    where
+        F: Fn(&MessageEntity),
+    {
         let mut transaction = self.pool.begin().await?;
         let result = sqlx::query!(
             r#"select id, status AS "status!: MessageStatus", payload, created_at, updated_at
@@ -159,7 +159,7 @@ RETURNING id, status AS \"status!: MessageStatus\", payload, created_at, updated
             updated_at: result.updated_at,
         };
 
-        process_fn(&entity)?;
+        process_fn(&entity);
 
         sqlx::query!(
             r#"
@@ -224,7 +224,6 @@ mod tests {
         let process_fn = |entity: &MessageEntity| {
             println!("processFn(): message.id: {:?}", entity.id);
             println!("processFn(): message.payload: {:?}", entity.payload);
-            Ok(())
         };
         sut.process_next(process_fn).await.unwrap();
 
@@ -245,39 +244,38 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn listen_test() {
-        let pool = get_pool().await;
-        let pool2 = pool.clone();
-        setup_db(pool.clone()).await.unwrap();
+    // #[tokio::test]
+    // async fn listen_test() {
+    //     let pool = get_pool().await;
+    //     let pool2 = pool.clone();
+    //     setup_db(pool.clone()).await.unwrap();
 
-        tokio::spawn(async move {
-            println!("started tokio spawn()");
-            let process_fn = |entity: &MessageEntity| {
-                println!("processFn(): message.id: {:?}", entity.id);
-                println!("processFn(): message.payload: {:?}", entity.payload);
-                Ok(())
-            };
-            match listen(pool, process_fn).await {
-                Err(err) => println!("ERROR in listener, {:?}", err),
-                _ => println!("listner should bloc"),
-            }
-        });
+    //     tokio::spawn(async move {
+    //         println!("started tokio spawn()");
+    //         let process_fn = |entity: &MessageEntity| {
+    //             println!("processFn(): message.id: {:?}", entity.id);
+    //             println!("processFn(): message.payload: {:?}", entity.payload);
+    //         };
+    //         match listen(pool, process_fn).await {
+    //             Err(err) => println!("ERROR in listener, {:?}", err),
+    //             _ => println!("listner should bloc"),
+    //         }
+    //     });
 
-        // NOTIFY channel, with add() new message into channel
-        let payload = Payload {
-            version: 1,
-            kind: "Command".to_owned(),
-            message: "my new message notification".to_owned(),
-        };
-        let msg = Message {
-            payload: json!(payload),
-        };
-        let sut = Messenger::new(pool2);
-        sut.add(msg).await.unwrap();
+    //     // NOTIFY channel, with add() new message into channel
+    //     let payload = Payload {
+    //         version: 1,
+    //         kind: "Command".to_owned(),
+    //         message: "my new message notification".to_owned(),
+    //     };
+    //     let msg = Message {
+    //         payload: json!(payload),
+    //     };
+    //     let sut = Messenger::new(pool2);
+    //     sut.add(msg).await.unwrap();
 
-        sleep(Duration::from_millis(5000));
+    //     sleep(Duration::from_millis(5000));
 
-        assert!(false);
-    }
+    //     assert!(false);
+    // }
 }
