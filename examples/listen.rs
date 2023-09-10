@@ -5,14 +5,16 @@ use std::sync::mpsc::{self, Receiver, Sender};
 
 #[tokio::main]
 async fn main() {
-    let _ = queuing().await.unwrap();
+    let _ = example().await.unwrap();
 }
 
 // more information
 // https://github.com/launchbadge/sqlx/blob/main/examples/postgres/listen/src/main.rs
 // https://www.fforward.ai/blog/posts/postgres-task-queues-the-secret-weapon-killing-specialized-queue-services
-async fn queuing() -> Result<(), sqlx::Error> {
+async fn example() -> Result<(), sqlx::Error> {
     let pool = get_pool().await;
+    // clean DB, so only new message get processed
+    sqlx::query!("DELETE FROM messages").execute(&pool).await?;
     let pool2 = pool.clone();
 
     let (tx, rx): (Sender<MessageEntity>, Receiver<MessageEntity>) = mpsc::channel();
@@ -47,10 +49,11 @@ async fn queuing() -> Result<(), sqlx::Error> {
     start_rx.recv().unwrap();
     let messenger = Messenger::new(pool2);
     for i in 0..3 {
+        println!("##################### in loop");
         let payload = Payload {
-            version: 1,
-            kind: "Command".to_owned(),
-            message: format!("my new message notification {}", i),
+            version: 2,
+            kind: "Query".to_owned(),
+            message: format!("message: {}", i),
         };
         let msg = Message {
             payload: json!(payload),

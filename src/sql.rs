@@ -45,9 +45,7 @@ where
 {
     let mut listener = PgListener::connect_with(&pool).await?;
     listener.listen("queue_notifications").await?;
-
     let messenger = Messenger::new(pool.clone());
-
     loop {
         let _notification = listener.recv().await;
         messenger.process_next(&process_fn).await?;
