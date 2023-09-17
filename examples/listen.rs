@@ -18,32 +18,24 @@ async fn example() -> Result<(), sqlx::Error> {
 
     let (tx, rx): (Sender<MessageEntity>, Receiver<MessageEntity>) = mpsc::channel();
 
+    let mut listener = PgListener::connect_with(&pool).await?;
+    listener.listen(QUEUE_NAME).await?;
+    let messenger = Messenger::new(pool.clone());
     let process_fn = move |entity: &MessageEntity| {
         if let Err(_) = tx.send(entity.clone()) {
             println!("ERROR sending from process_fn()");
         }
     };
-
-    let (start_tx, start_rx): (Sender<()>, Receiver<()>) = mpsc::channel();
-    let start_tx2 = start_tx.clone();
     let _ = tokio::spawn(async move {
-        start_tx.send(()).unwrap();
-        listen(pool, process_fn)
-            .await
-            .expect("ERROR listening to pq task queue");
-    });
-
-    let rx_handle = tokio::spawn(async move {
-        start_tx2.send(()).unwrap();
         for _ in 0..3 {
-            let msg = rx.recv().unwrap();
-            println!("recv(): {:?}", msg);
+            let _notification = listener.recv().await;
+            messenger
+                .process_next(&process_fn)
+                .await
+                .expect("Failed to process message");
         }
     });
 
-    // NOTIFY channel, with add() new message into channel
-    start_rx.recv().unwrap();
-    start_rx.recv().unwrap();
     let messenger = Messenger::new(pool2);
     for i in 0..3 {
         let payload = Payload {
@@ -57,7 +49,10 @@ async fn example() -> Result<(), sqlx::Error> {
         messenger.add(msg).await.unwrap();
     }
 
-    rx_handle.await.unwrap();
+    for _ in 0..3 {
+        let msg = rx.recv().unwrap();
+        println!("recv(): {:?}", msg);
+    }
 
     Ok(())
 }
@@ -65,17 +60,4 @@ async fn example() -> Result<(), sqlx::Error> {
 async fn get_pool() -> PgPool {
     let conn_str = std::env::var("DATABASE_URL").expect("Env Var DATABASE_URL must be set");
     PgPool::connect(&conn_str).await.unwrap()
-}
-
-async fn listen<F>(pool: PgPool, process_fn: F) -> Result<(), sqlx::Error>
-where
-    F: Fn(&MessageEntity),
-{
-    let mut listener = PgListener::connect_with(&pool).await?;
-    listener.listen(QUEUE_NAME).await?;
-    let messenger = Messenger::new(pool.clone());
-    loop {
-        let _notification = listener.recv().await;
-        messenger.process_next(&process_fn).await?;
-    }
 }
