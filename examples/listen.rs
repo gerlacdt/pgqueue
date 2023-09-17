@@ -1,4 +1,5 @@
-use pgqueue::sql::{Message, MessageEntity, Messenger, Payload};
+use pgqueue::sql::{Message, MessageEntity, Messenger};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{postgres::PgListener, PgPool};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -8,6 +9,11 @@ static QUEUE_NAME: &'static str = "queue_notifications";
 #[tokio::main]
 async fn main() {
     let _ = example().await.unwrap();
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct CustomPayload {
+    pub number: i64,
 }
 
 async fn example() -> Result<(), sqlx::Error> {
@@ -38,21 +44,22 @@ async fn example() -> Result<(), sqlx::Error> {
 
     let messenger = Messenger::new(pool2);
     for i in 0..3 {
-        let payload = Payload {
-            version: 1,
-            kind: "COMMAND".to_owned(),
-            message: format!("message: {}", i),
-        };
+        let payload = CustomPayload { number: i };
         let msg = Message {
             payload: json!(payload),
         };
         messenger.add(msg).await.unwrap();
     }
 
+    let mut result: Vec<i64> = vec![];
     for _ in 0..3 {
         let msg = rx.recv().unwrap();
         println!("recv(): {:?}", msg);
+        result.push(msg.payload["number"].as_i64().unwrap())
     }
+
+    let expected = vec![0, 1, 2];
+    assert_eq!(expected, result);
 
     Ok(())
 }

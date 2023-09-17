@@ -2,10 +2,6 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-pub fn hello() {
-    println!("Hello World!");
-}
-
 #[derive(Clone, Debug, PartialEq, sqlx::Type, Deserialize, Serialize)]
 #[sqlx(type_name = "message_status", rename_all = "lowercase")]
 pub enum MessageStatus {
@@ -26,13 +22,6 @@ pub struct MessageEntity {
 
 pub struct Message {
     pub payload: serde_json::Value,
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct Payload {
-    pub version: i32,
-    pub kind: String,
-    pub message: String,
 }
 
 pub struct Messenger {
@@ -194,5 +183,12 @@ mod tests {
         };
 
         Ok(entity)
+    }
+
+    #[derive(Deserialize, Serialize)]
+    pub struct Payload {
+        pub version: i32,
+        pub kind: String,
+        pub message: String,
     }
 }
