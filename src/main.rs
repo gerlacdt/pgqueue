@@ -1,4 +1,6 @@
+use pgqueue::sql::say_hello;
+
 #[tokio::main]
 async fn main() {
-    println!("Hello, world!")
+    say_hello();
 }

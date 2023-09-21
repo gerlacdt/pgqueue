@@ -2,6 +2,10 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+pub fn say_hello() {
+    println!("Hello, world!");
+}
+
 #[derive(Clone, Debug, PartialEq, sqlx::Type, Deserialize, Serialize)]
 #[sqlx(type_name = "message_status", rename_all = "lowercase")]
 pub enum MessageStatus {
